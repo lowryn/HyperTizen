@@ -10,7 +10,9 @@ namespace HyperTizen
     {
         private const string SearchTarget = "urn:hyperhdr.eu:device:basic:1";
 
-        // Returns (ip, port) of HyperHDR's FlatBuffers TCP endpoint, or (null, 0) if not found.
+        // Returns (ip, fbsPort) of a discovered HyperHDR instance.
+        // ip is set whenever a HyperHDR SSDP response is found.
+        // fbsPort is set only if HYPERHDR-FBS-PORT header is present (may be 0 otherwise).
         public static (string ip, int port) GetHyperIpAndPort()
         {
             string ssdpRequest =
@@ -41,12 +43,12 @@ namespace HyperTizen
                         var locationMatch = Regex.Match(response, @"LOCATION:\s*(http://[^\s]+)", RegexOptions.IgnoreCase);
                         var portMatch     = Regex.Match(response, @"HYPERHDR-FBS-PORT:\s*(\d+)", RegexOptions.IgnoreCase);
 
-                        if (locationMatch.Success && portMatch.Success)
+                        if (locationMatch.Success)
                         {
-                            string ip = new Uri(locationMatch.Groups[1].Value).Host;
-                            int port  = int.Parse(portMatch.Groups[1].Value);
-                            Tizen.Log.Debug("HyperTizen", $"SSDP: found HyperHDR at {ip}:{port}");
-                            return (ip, port);
+                            string ip  = new Uri(locationMatch.Groups[1].Value).Host;
+                            int fbsPort = portMatch.Success ? int.Parse(portMatch.Groups[1].Value) : 0;
+                            Tizen.Log.Debug("HyperTizen", $"SSDP: found HyperHDR at {ip} (FBS port: {fbsPort})");
+                            return (ip, fbsPort);
                         }
                     }
                 }

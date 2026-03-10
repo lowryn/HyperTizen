@@ -25,11 +25,34 @@ namespace HyperTizen.WebSocket
             }
             else
             {
-                if (!Preference.Contains("rpcServer")) return;
-                _wsClient = new WebSocketClient(Preference.Get<string>("rpcServer"));
+                string rpcServer = ResolveRpcServer();
+                if (rpcServer == null) return;
+                _wsClient = new WebSocketClient(rpcServer);
                 Task.Run(() => _wsClient.ConnectAsync());
                 Task.Run(() => Start());
             }
+        }
+
+        // Returns a ws:// URL for HyperHDR — from stored preference, or auto-discovered via SSDP.
+        private string ResolveRpcServer()
+        {
+            if (Preference.Contains("rpcServer"))
+                return Preference.Get<string>("rpcServer");
+
+            Tizen.Log.Debug("HyperTizen", "rpcServer not set, attempting SSDP auto-discovery...");
+            (string ip, _) = SsdpDiscovery.GetHyperIpAndPort();
+            if (ip == null)
+            {
+                Tizen.Log.Debug("HyperTizen", "SSDP: no HyperHDR found — configure rpcServer via UI");
+                return null;
+            }
+
+            // Use HyperHDR's standard JSON/WebSocket port (19400) as default
+            string url = $"ws://{ip}:19400/";
+            Preference.Set("rpcServer", url);
+            App.Configuration.RPCServer = url;
+            Tizen.Log.Debug("HyperTizen", $"SSDP auto-discovered rpcServer: {url}");
+            return url;
         }
 
         private bool TryInitSecVideoCapture()
