@@ -35,9 +35,17 @@ namespace HyperTizen.WebSocket
         {
             if (client != null && Capturer.GetCondition())
             {
+                var cond = Capturer.LastCondition;
+                Tizen.Log.Debug("HyperTizen", $"Condition: ScreenCapturePoints={cond.ScreenCapturePoints}, SleepMS={cond.SleepMS}, Width={cond.Width}, Height={cond.Height}");
+                // Save condition to preferences so it can be queried via WebSocket ReadConfig
+                Preference.Set("cond_scp", cond.ScreenCapturePoints.ToString());
+                Preference.Set("cond_sleep", cond.SleepMS.ToString());
+                Preference.Set("cond_w", cond.Width.ToString());
+                Preference.Set("cond_h", cond.Height.ToString());
+
                 while (App.Configuration.Enabled || shouldStart)
                 {
-                    Color[] colors = Capturer.GetColors();
+                    Color[] colors = await Capturer.GetColors();
                     string image = Capturer.ToImage(colors);
 
                     if (client?.client?.State == WebSocketState.Open)
@@ -57,7 +65,7 @@ namespace HyperTizen.WebSocket
         public async Task Stop()
         {
             if (App.Configuration.Enabled) App.Configuration.Enabled = false;
-            Color[] colors = Capturer.GetColors();
+            Color[] colors = await Capturer.GetColors();
             string image = Capturer.ToImage(colors);
 
             if (client?.client?.State == WebSocketState.Open)

@@ -72,9 +72,12 @@ namespace HyperTizen.WebSocket.DataTypes
 
         public string command { get; set; } = "image";
         public string imagedata { get; set; }
+        public int imagewidth { get; set; } = 64;
+        public int imageheight { get; set; } = 48;
         public string name { get; set; } = "HyperTizen Data";
         public string format { get; set; } = "auto";
         public byte priority { get; set; } = 99;
+        public int duration { get; set; } = -1;
         public string origin { get; set; } = "HyperTizen";
     }
 }

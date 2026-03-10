@@ -10,5 +10,6 @@
 	<feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
 	<tizen:metadata key="http://samsung.com/tv/metadata/prelaunch.support" value="true"/>
 	<tizen:profile name="tv"/>
-	<tizen:setting background-support="disable" context-menu="enable" encryption="disable" hwkey-event="enable" install-location="auto" screen-orientation="landscape"/>
+	<tizen:setting background-support="enable" context-menu="enable" encryption="disable" hwkey-event="enable" install-location="auto" screen-orientation="landscape"/>
+	<tizen:background-category value="media"/>
 </widget>

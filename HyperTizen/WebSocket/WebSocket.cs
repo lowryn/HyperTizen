@@ -178,6 +178,7 @@ namespace HyperTizen.WebSocket
         {
             this.uri = uri;
             client = new ClientWebSocket();
+            client.Options.KeepAliveInterval = TimeSpan.Zero; // prevent unsolicited pong frames
         }
 
         public async Task ConnectAsync()

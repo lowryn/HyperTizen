@@ -2,6 +2,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using SkiaSharp;
 using Tizen.Applications.Notifications;
 using Tizen.System;
@@ -28,24 +29,22 @@ namespace HyperTizen
             }
         }
 
-        private static CapturePoint[] _capturedPoints = new CapturePoint[] {
-            new CapturePoint(0.21, 0.05),
-            new CapturePoint(0.45, 0.05),
-            new CapturePoint(0.7, 0.05),
-            new CapturePoint(0.93, 0.07),
-            new CapturePoint(0.95, 0.275),
-            new CapturePoint(0.95, 0.5),
-            new CapturePoint(0.95, 0.8),
-            new CapturePoint(0.79, 0.95),
-            new CapturePoint(0.65, 0.95),
-            new CapturePoint(0.35, 0.95),
-            new CapturePoint(0.15, 0.95),
-            new CapturePoint(0.05, 0.725),
-            new CapturePoint(0.05, 0.4),
-            new CapturePoint(0.05, 0.2),
-            new CapturePoint(0.35, 0.5),
-            new CapturePoint(0.65, 0.5)
+        // 8 static points — all captured every frame.
+        // 4 batches × 20ms = ~10fps, all 8 zones update together.
+        private static readonly CapturePoint[][] _pointSets = {
+            new CapturePoint[] {
+                new CapturePoint(0.21,  0.05),   // [0] top-left
+                new CapturePoint(0.7,   0.05),   // [1] top-right
+                new CapturePoint(0.95,  0.275),  // [2] right-top
+                new CapturePoint(0.95,  0.8),    // [3] right-bottom
+                new CapturePoint(0.65,  0.95),   // [4] bottom-right
+                new CapturePoint(0.35,  0.95),   // [5] bottom-left
+                new CapturePoint(0.05,  0.2),    // [6] left-top
+                new CapturePoint(0.05,  0.725),  // [7] left-bottom
+            }
         };
+        private static int _setIndex = 0;
+        private static readonly Color[] _blended = new Color[8];
         
         [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "cs_ve_get_rgb_measure_condition")]
         private static extern int MeasureCondition(out Condition unknown);
@@ -65,6 +64,8 @@ namespace HyperTizen
         [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ve_get_rgb_measure_pixel")]
         private static extern int MeasurePixel7(int i, out Color color);
         
+        public static Condition LastCondition => _condition;
+
         public static bool GetCondition()
         {
             int res = -1;
@@ -97,136 +98,77 @@ namespace HyperTizen
             }
         }
 
-        public static void SetCapturePoints(CapturePoint[] capturePoints)
+        public static async Task<Color[]> GetColors()
         {
-            _capturedPoints = capturePoints;
-        }
-        
-        public static Color[] GetColors()
-        {
-            Color[] colorData = new Color[_capturedPoints.Length];
-            int[] updatedIndexes = new int[_condition.ScreenCapturePoints];
+            CapturePoint[] pts = _pointSets[_setIndex];
+            int offset = _setIndex * 4;
 
             int i = 0;
-            while (i < _capturedPoints.Length)
+            while (i < pts.Length)
             {
                 if (_condition.ScreenCapturePoints == 0) break;
-                for (int j = 0; j < _condition.ScreenCapturePoints; j++)
+
+                int batchSize = Math.Min(_condition.ScreenCapturePoints, pts.Length - i);
+                int batchStart = i;
+
+                for (int j = 0; j < batchSize; j++)
                 {
-                    updatedIndexes[j] = i;
-                    int x = (int)(_capturedPoints[i].X * (double)_condition.Width) - _condition.PixelDensityX / 2;
-                    int y = (int)(_capturedPoints[i].Y * (double)_condition.Height) - _condition.PixelDensityY / 2;
+                    int x = (int)(pts[i].X * (double)_condition.Width) - _condition.PixelDensityX / 2;
+                    int y = (int)(pts[i].Y * (double)_condition.Height) - _condition.PixelDensityY / 2;
                     x = (x >= _condition.Width - _condition.PixelDensityX) ? _condition.Width - (_condition.PixelDensityX + 1) : x;
                     y = (y >= _condition.Height - _condition.PixelDensityY) ? (_condition.Height - _condition.PixelDensityY + 1) : y;
-                    int res;
-                    if (!IsTizen7OrHigher)
-                    {
-                        res = MeasurePosition(j, x, y);
-                    } else
-                    {
-                        res = MeasurePosition7(j, x, y);
-                    }
-                  
+
+                    int _ = IsTizen7OrHigher ? MeasurePosition7(j, x, y) : MeasurePosition(j, x, y);
                     i++;
-                    if (res < 0)
-                    {
-                        // This should not happen, handle it.
-                    }
                 }
 
-                if (_condition.SleepMS > 0)
-                {
-                    Thread.Sleep(_condition.SleepMS);
-                }
-                int k = 0;
-                while (k < _condition.ScreenCapturePoints)
+                if (_condition.SleepMS > 0) await Task.Delay(_condition.SleepMS);
+
+                int k = 0, retries = 0;
+                while (k < batchSize)
                 {
                     Color color;
+                    int res = IsTizen7OrHigher ? MeasurePixel7(k, out color) : MeasurePixel(k, out color);
 
-                    int res;
-
-                    if (!IsTizen7OrHigher)
+                    if (res >= 0 && color.R <= 1023 && color.G <= 1023 && color.B <= 1023)
                     {
-                        res = MeasurePixel(k, out color);
-                    } else
-                    {
-                        res = MeasurePixel7(k, out color);
+                        _blended[offset + batchStart + k] = color;
+                        k++;
+                        retries = 0;
                     }
-
-                    if (res < 0)
-                    {
-                        // This should not happen, handle it.
-                    } else
-                    {
-                        bool invalidColorData = color.R > 1023 || color.G > 1023 || color.B > 1023;
-
-                        if (invalidColorData)
-                        {
-                            // This should not happen, handle it.
-                        } else
-                        {
-                            colorData[i - _condition.ScreenCapturePoints + k] = color;
-                            k++;
-                        }
-                    }
+                    else if (++retries >= 20) { k++; retries = 0; }
                 }
             }
-            return colorData;
+
+            _setIndex = 0; // single set, no rotation
+            return (Color[])_blended.Clone();
         }
 
         public static string ToImage(Color[] colors)
         {
+            // [0]=top-left [1]=top-right [2]=right-top [3]=right-bottom [4]=bottom-right [5]=bottom-left [6]=left-top [7]=left-bottom
             using (var image = new SKBitmap(64, 48))
+            using (var canvas = new SKCanvas(image))
             {
-                for (int x = 0; x < 64; x++)
-                {
-                    Color color = colors[x / 16];
-                    SKColor sKColor = ClampColor(color);
-                    for (int y = 0; y < 4; y++)
-                    {
-                        image.SetPixel(x, y, sKColor);
-                    }
-                }
-
-                for (int x = 0; x < 64; x++)
-                {
-                    Color color = colors[x / 16 + 7];
-                    SKColor sKColor = ClampColor(color);
-                    for (int y = 44; y < 48; y++)
-                    {
-                        image.SetPixel(x, y, sKColor);
-                    }
-                }
-
-                for (int y = 0; y < 48; y++)
-                {
-                    Color color = colors[11 + y / 16];
-                    SKColor sKColor = ClampColor(color);
-                    for (int x = 0; x < 3; x++)
-                    {
-                        image.SetPixel(x, y, sKColor);
-                    }
-                }
-
-                for (int y = 0; y < 48; y++)
-                {
-                    Color color = colors[4 + y / 16];
-                    SKColor sKColor = ClampColor(color);
-                    for (int x = 61; x < 64; x++)
-                    {
-                        image.SetPixel(x, y, sKColor);
-                    }
-                }
+                canvas.Clear(SKColors.Black);
+                // Top strip (rows 0-3): 2 zones
+                canvas.DrawRect(SKRect.Create(0,  0, 32, 4), new SKPaint { Color = ClampColor(colors[0]) });
+                canvas.DrawRect(SKRect.Create(32, 0, 32, 4), new SKPaint { Color = ClampColor(colors[1]) });
+                // Right strip (cols 61-63): 2 zones
+                canvas.DrawRect(SKRect.Create(61,  0, 3, 24), new SKPaint { Color = ClampColor(colors[2]) });
+                canvas.DrawRect(SKRect.Create(61, 24, 3, 24), new SKPaint { Color = ClampColor(colors[3]) });
+                // Bottom strip (rows 44-47): 2 zones
+                canvas.DrawRect(SKRect.Create(32, 44, 32, 4), new SKPaint { Color = ClampColor(colors[4]) });
+                canvas.DrawRect(SKRect.Create(0,  44, 32, 4), new SKPaint { Color = ClampColor(colors[5]) });
+                // Left strip (cols 0-2): 2 zones
+                canvas.DrawRect(SKRect.Create(0,  0, 3, 24), new SKPaint { Color = ClampColor(colors[6]) });
+                canvas.DrawRect(SKRect.Create(0, 24, 3, 24), new SKPaint { Color = ClampColor(colors[7]) });
 
                 using (var memoryStream = new MemoryStream())
                 {
                     using (var data = SKImage.FromBitmap(image).Encode(SKEncodedImageFormat.Png, 100))
-                    {
                         data.SaveTo(memoryStream);
-                    }
-                    byte[] imageBytes = memoryStream.ToArray();
-                    string base64String = Convert.ToBase64String(imageBytes);
-                    return base64String;
+                    return Convert.ToBase64String(memoryStream.ToArray());
                 }
             }
         }
