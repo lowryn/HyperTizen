@@ -1,8 +1,9 @@
-﻿using Tizen.Applications;
+﻿using System;
+using System.Threading.Tasks;
+using Tizen.Applications;
 using Tizen.Applications.Notifications;
 using Tizen.System;
 using HyperTizen.WebSocket;
-using System.Threading.Tasks;
 
 namespace HyperTizen
 {
@@ -20,13 +21,35 @@ namespace HyperTizen
 
         private void Display_StateChanged(object sender, DisplayStateChangedEventArgs e)
         {
+            // Dim is a transient state on the way to/from Off — ignore it so
+            // we don't spuriously stop the capture mid-transition.
+            if (e.State == DisplayState.Dim) return;
+
+            // Fire-and-forget with exception containment. Start/Stop are
+            // serialised internally via HyperionClient's lifecycle lock, so
+            // a rapid off→on sequence is safe.
             if (e.State == DisplayState.Off)
             {
-                Task.Run(() => client.Stop());
-            } else if (e.State == DisplayState.Normal)
+                _ = Task.Run(async () =>
+                {
+                    try { await client.Stop(); }
+                    catch (Exception ex) { Tizen.Log.Debug("HyperTizen", "Display Off → Stop failed: " + ex.Message); }
+                });
+            }
+            else if (e.State == DisplayState.Normal)
             {
-                Configuration.Enabled = bool.Parse(Preference.Get<string>("enabled"));
-                Task.Run(() => client.Start());
+                // Refresh the user-facing enabled flag from preference in case
+                // it was toggled while the service wasn't watching.
+                if (Preference.Contains("enabled"))
+                    Configuration.Enabled = bool.Parse(Preference.Get<string>("enabled"));
+
+                if (!Configuration.Enabled) return;
+
+                _ = Task.Run(async () =>
+                {
+                    try { await client.Start(); }
+                    catch (Exception ex) { Tizen.Log.Debug("HyperTizen", "Display Normal → Start failed: " + ex.Message); }
+                });
             }
         }
 

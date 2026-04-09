@@ -3,12 +3,14 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace HyperTizen
 {
     public static class SsdpDiscovery
     {
         private const string SearchTarget = "urn:hyperhdr.eu:device:basic:1";
+        private static readonly TimeSpan DiscoveryBudget = TimeSpan.FromSeconds(5);
 
         // Returns (ip, fbsPort) of a discovered HyperHDR instance.
         // ip is set whenever a HyperHDR SSDP response is found.
@@ -26,17 +28,26 @@ namespace HyperTizen
             {
                 using (var udp = new UdpClient())
                 {
-                    udp.Client.ReceiveTimeout = 5000;
                     var multicast = new IPEndPoint(IPAddress.Parse("239.255.255.250"), 1900);
                     byte[] req = Encoding.UTF8.GetBytes(ssdpRequest);
                     udp.Send(req, req.Length, multicast);
 
-                    DateTime deadline = DateTime.Now.AddSeconds(5);
-                    while (DateTime.Now < deadline)
+                    DateTime deadline = DateTime.UtcNow + DiscoveryBudget;
+                    while (DateTime.UtcNow < deadline)
                     {
-                        if (udp.Available == 0) continue;
-                        var remote = new IPEndPoint(IPAddress.Any, 0);
-                        string response = Encoding.UTF8.GetString(udp.Receive(ref remote));
+                        TimeSpan remaining = deadline - DateTime.UtcNow;
+                        if (remaining <= TimeSpan.Zero) break;
+
+                        // Async receive with a timeout — Task.WhenAny yields
+                        // while waiting, avoiding the old CPU-pegging spin.
+                        var receiveTask = udp.ReceiveAsync();
+                        var timeoutTask = Task.Delay(remaining);
+                        var completed   = Task.WhenAny(receiveTask, timeoutTask).GetAwaiter().GetResult();
+
+                        if (completed != receiveTask) break; // timed out
+                        if (receiveTask.IsFaulted) break;
+
+                        string response = Encoding.UTF8.GetString(receiveTask.Result.Buffer);
 
                         if (!response.ToLower().Contains(SearchTarget.ToLower())) continue;
 

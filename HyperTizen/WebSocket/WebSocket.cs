@@ -139,19 +139,22 @@ namespace HyperTizen.WebSocket
                 case "rpcServer":
                     {
                         App.Configuration.RPCServer = setConfigEvent.value;
+                        // Persist first so the reconnect path picks up the new URI
+                        Preference.Set(setConfigEvent.key, setConfigEvent.value);
                         App.client.UpdateURI(setConfigEvent.value);
-                        break;
+                        return;
                     }
                 case "enabled":
                     {
                         bool value = bool.Parse(setConfigEvent.value);
-                        if (!App.Configuration.Enabled && value)
-                        {
-                            App.Configuration.Enabled = value;
-                            Task.Run(() => App.client.Start(value));
-                        }
-                        else App.Configuration.Enabled = value;
-                        break;
+                        bool previous = App.Configuration.Enabled;
+                        App.Configuration.Enabled = value;
+                        Preference.Set(setConfigEvent.key, setConfigEvent.value);
+                        if (value && !previous)
+                            _ = App.client.Start();
+                        else if (!value && previous)
+                            _ = App.client.Stop();
+                        return;
                     }
             }
 
@@ -181,9 +184,15 @@ namespace HyperTizen.WebSocket
             client.Options.KeepAliveInterval = TimeSpan.Zero; // prevent unsolicited pong frames
         }
 
-        public async Task ConnectAsync()
+        public async Task ConnectAsync(CancellationToken ct = default)
         {
-            await client.ConnectAsync(new Uri(uri), CancellationToken.None);
+            // Bound the connect attempt so a black-hole server can't hang us
+            // forever when called from the capture loop's reconnect path.
+            using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                connectCts.CancelAfter(TimeSpan.FromSeconds(5));
+                await client.ConnectAsync(new Uri(uri), connectCts.Token);
+            }
             _ = ReceiveMessagesAsync();
         }
 
