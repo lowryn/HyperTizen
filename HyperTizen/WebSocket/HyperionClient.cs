@@ -202,9 +202,18 @@ namespace HyperTizen.WebSocket
         // Legacy libvideoenhance.so path: 8-point pixel sampling → PNG → WS JSON
         private async Task StartLegacy(CancellationToken ct)
         {
-            if (!Capturer.GetCondition())
+            // Retry GetCondition — the hardware may not be ready immediately.
+            bool condOk = false;
+            for (int attempt = 1; attempt <= 5; attempt++)
             {
-                Tizen.Log.Debug("HyperTizen", "StartLegacy: GetCondition() failed, aborting");
+                condOk = Capturer.GetCondition();
+                if (condOk) break;
+                Tizen.Log.Debug("HyperTizen", $"StartLegacy: GetCondition() failed (attempt {attempt}/5), retrying in 2s");
+                await Task.Delay(2000, ct);
+            }
+            if (!condOk)
+            {
+                Tizen.Log.Debug("HyperTizen", "StartLegacy: GetCondition() failed after all retries, aborting");
                 return;
             }
 

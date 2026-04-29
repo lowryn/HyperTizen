@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using SkiaSharp;
+using Tizen.Applications;
 using Tizen.Applications.Notifications;
-using Tizen.System;
 
 namespace HyperTizen
 {
@@ -13,21 +13,8 @@ namespace HyperTizen
     {
         private static Condition _condition;
 
-        private static bool IsTizen7OrHigher
-        {
-            get
-            {
-                string version;
-                Information.TryGetValue("http://tizen.org/feature/platform.version", out version);
-                if (int.Parse(version.Split('.')[0]) >= 7)
-                {
-                    return true;
-                } else
-                {
-                    return false;
-                }
-            }
-        }
+        private enum ApiVariant { Unknown, PpiVe, Ve7, CsVe }
+        private static ApiVariant _api = ApiVariant.Unknown;
 
         // 8 static points — all captured every frame.
         // 4 batches × 20ms = ~10fps, all 8 zones update together.
@@ -45,7 +32,28 @@ namespace HyperTizen
         };
         private static int _setIndex = 0;
         private static readonly Color[] _blended = new Color[8];
-        
+
+        // Tizen 9 new firmware (ppi_ve_* prefix)
+        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ppi_ve_get_rgb_measure_condition")]
+        private static extern int MeasureConditionPpi(out Condition unknown);
+
+        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ppi_ve_set_rgb_measure_position")]
+        private static extern int MeasurePositionPpi(int i, int x, int y);
+
+        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ppi_ve_get_rgb_measure_pixel")]
+        private static extern int MeasurePixelPpi(int i, out Color color);
+
+        // Tizen 7+ (ve_* prefix)
+        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ve_get_rgb_measure_condition")]
+        private static extern int MeasureCondition7(out Condition unknown);
+
+        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ve_set_rgb_measure_position")]
+        private static extern int MeasurePosition7(int i, int x, int y);
+
+        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ve_get_rgb_measure_pixel")]
+        private static extern int MeasurePixel7(int i, out Color color);
+
+        // Pre-Tizen 7 (cs_ve_* prefix)
         [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "cs_ve_get_rgb_measure_condition")]
         private static extern int MeasureCondition(out Condition unknown);
 
@@ -55,47 +63,106 @@ namespace HyperTizen
         [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "cs_ve_get_rgb_measure_pixel")]
         private static extern int MeasurePixel(int i, out Color color);
 
-        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ve_get_rgb_measure_condition")]
-        private static extern int MeasureCondition7(out Condition unknown);
-
-        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ve_set_rgb_measure_position")]
-        private static extern int MeasurePosition7(int i, int x, int y);
-
-        [DllImport("/usr/lib/libvideoenhance.so", CallingConvention = CallingConvention.Cdecl, EntryPoint = "ve_get_rgb_measure_pixel")]
-        private static extern int MeasurePixel7(int i, out Color color);
-        
         public static Condition LastCondition => _condition;
 
         public static bool GetCondition()
         {
-            int res = -1;
-            try
+            if (_api == ApiVariant.Unknown)
+                _api = ProbeApiVariant();
+
+            if (_api == ApiVariant.Unknown)
             {
-                if (!IsTizen7OrHigher)
-                {
-                    res = MeasureCondition(out _condition);
-                } else
-                {
-                    res = MeasureCondition7(out _condition);
-                }
-            } catch
-            {
-                Notification notification = new Notification
+                NotificationManager.Post(new Notification
                 {
                     Title = "HyperTizen",
                     Content = "Your TV does not support the required functions for HyperTizen.",
                     Count = 1
-                };
-
-                NotificationManager.Post(notification);
-            }
-            if (res < 0)
-            {
+                });
                 return false;
-            } else
-            {
-                return true;
             }
+
+            try
+            {
+                int res = CallMeasureCondition(out _condition);
+                return res >= 0;
+            }
+            catch
+            {
+                NotificationManager.Post(new Notification
+                {
+                    Title = "HyperTizen",
+                    Content = "Your TV does not support the required functions for HyperTizen.",
+                    Count = 1
+                });
+                return false;
+            }
+        }
+
+        private static int CallMeasureCondition(out Condition c)
+        {
+            switch (_api)
+            {
+                case ApiVariant.PpiVe: return MeasureConditionPpi(out c);
+                case ApiVariant.Ve7:   return MeasureCondition7(out c);
+                default:               return MeasureCondition(out c);
+            }
+        }
+
+        private static int CallMeasurePosition(int i, int x, int y)
+        {
+            switch (_api)
+            {
+                case ApiVariant.PpiVe: return MeasurePositionPpi(i, x, y);
+                case ApiVariant.Ve7:   return MeasurePosition7(i, x, y);
+                default:               return MeasurePosition(i, x, y);
+            }
+        }
+
+        private static int CallMeasurePixel(int i, out Color color)
+        {
+            switch (_api)
+            {
+                case ApiVariant.PpiVe: return MeasurePixelPpi(i, out color);
+                case ApiVariant.Ve7:   return MeasurePixel7(i, out color);
+                default:               return MeasurePixel(i, out color);
+            }
+        }
+
+        // Probe newest → oldest. Writes "api_probe" for diagnostics.
+        private static ApiVariant ProbeApiVariant()
+        {
+            Condition dummy;
+
+            try
+            {
+                MeasureConditionPpi(out dummy);
+                Tizen.Log.Debug("HyperTizen", "API probe: ppi_ve_* found");
+                Preference.Set("api_probe", "ppi_ve");
+                return ApiVariant.PpiVe;
+            }
+            catch { }
+
+            try
+            {
+                MeasureCondition7(out dummy);
+                Tizen.Log.Debug("HyperTizen", "API probe: ve_* found");
+                Preference.Set("api_probe", "ve7");
+                return ApiVariant.Ve7;
+            }
+            catch { }
+
+            try
+            {
+                MeasureCondition(out dummy);
+                Tizen.Log.Debug("HyperTizen", "API probe: cs_ve_* found");
+                Preference.Set("api_probe", "cs_ve");
+                return ApiVariant.CsVe;
+            }
+            catch { }
+
+            Tizen.Log.Debug("HyperTizen", "API probe: no variant found");
+            Preference.Set("api_probe", "none");
+            return ApiVariant.Unknown;
         }
 
         public static async Task<Color[]> GetColors()
@@ -118,7 +185,7 @@ namespace HyperTizen
                     x = (x >= _condition.Width - _condition.PixelDensityX) ? _condition.Width - (_condition.PixelDensityX + 1) : x;
                     y = (y >= _condition.Height - _condition.PixelDensityY) ? (_condition.Height - _condition.PixelDensityY + 1) : y;
 
-                    int _ = IsTizen7OrHigher ? MeasurePosition7(j, x, y) : MeasurePosition(j, x, y);
+                    CallMeasurePosition(j, x, y);
                     i++;
                 }
 
@@ -128,7 +195,7 @@ namespace HyperTizen
                 while (k < batchSize)
                 {
                     Color color;
-                    int res = IsTizen7OrHigher ? MeasurePixel7(k, out color) : MeasurePixel(k, out color);
+                    int res = CallMeasurePixel(k, out color);
 
                     if (res >= 0 && color.R <= 1023 && color.G <= 1023 && color.B <= 1023)
                     {
