@@ -58,7 +58,7 @@ namespace HyperTizen
                         {
                             string ip  = new Uri(locationMatch.Groups[1].Value).Host;
                             int fbsPort = portMatch.Success ? int.Parse(portMatch.Groups[1].Value) : 0;
-                            Tizen.Log.Debug("HyperTizen", $"SSDP: found HyperHDR at {ip} (FBS port: {fbsPort})");
+                            Diag.Log($"SSDP: found HyperHDR at {ip} (FBS port: {fbsPort})");
                             return (ip, fbsPort);
                         }
                     }
@@ -66,7 +66,7 @@ namespace HyperTizen
             }
             catch (Exception ex)
             {
-                Tizen.Log.Debug("HyperTizen", "SSDP discovery failed: " + ex.Message);
+                Diag.Log("SSDP discovery failed: " + ex.Message);
             }
 
             return (null, 0);

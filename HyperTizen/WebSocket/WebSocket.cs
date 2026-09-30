@@ -5,7 +5,6 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
 using HyperTizen.WebSocket.DataTypes;
 using Rssdp;
 using Tizen.Applications;
@@ -28,57 +27,142 @@ namespace HyperTizen.WebSocket
             _httpListener.Prefixes.Add(uriPrefix);
         }
 
-        public async Task StartAsync()
+        public void Start()
         {
             _httpListener.Start();
+        }
+
+        public void Stop()
+        {
+            try { _httpListener.Close(); } catch { }
+        }
+
+        public async Task RunAsync()
+        {
             while (true)
             {
-                var httpContext = await _httpListener.GetContextAsync();
-                if (httpContext.Request.IsWebSocketRequest)
+                try
                 {
-                    var wsContext = await httpContext.AcceptWebSocketAsync(null);
-                    _ = HandleWebSocketAsync(wsContext.WebSocket);
+                    var httpContext = await _httpListener.GetContextAsync();
+                    if (httpContext.Request.IsWebSocketRequest)
+                    {
+                        var wsContext = await httpContext.AcceptWebSocketAsync(null);
+                        _ = HandleWebSocketAsync(wsContext.WebSocket);
+                    }
+                    else if (httpContext.Request.Url.AbsolutePath == "/set")
+                    {
+                        string key = httpContext.Request.QueryString["key"];
+                        string value = httpContext.Request.QueryString["value"];
+                        string reply;
+                        if (string.IsNullOrEmpty(key) || value == null)
+                        {
+                            httpContext.Response.StatusCode = 400;
+                            reply = "usage: /set?key=enabled&value=true";
+                        }
+                        else
+                        {
+                            Diag.Log($"HTTP /set key={key} value={value}");
+                            SetConfiguration(new SetConfigEvent { Event = Event.SetConfig, key = key, value = value });
+                            reply = "ok";
+                        }
+                        byte[] okBody = Encoding.UTF8.GetBytes(reply);
+                        httpContext.Response.ContentType = "text/plain; charset=utf-8";
+                        httpContext.Response.ContentLength64 = okBody.Length;
+                        httpContext.Response.OutputStream.Write(okBody, 0, okBody.Length);
+                        httpContext.Response.Close();
+                    }
+                    else if (httpContext.Request.Url.AbsolutePath == "/frame.bmp")
+                    {
+                        byte[] bmp = null;
+                        string frameError = "capture returned no frame (see /logs)";
+                        try { bmp = VideoCapture.SnapshotBmp(); }
+                        catch (Exception ex) { frameError = ex.GetType().Name + " " + ex.Message; }
+
+                        if (bmp == null)
+                        {
+                            Diag.Log("GET /frame.bmp failed: " + frameError);
+                            byte[] msg = Encoding.UTF8.GetBytes(frameError);
+                            httpContext.Response.StatusCode = 503;
+                            httpContext.Response.ContentType = "text/plain; charset=utf-8";
+                            httpContext.Response.ContentLength64 = msg.Length;
+                            httpContext.Response.OutputStream.Write(msg, 0, msg.Length);
+                        }
+                        else
+                        {
+                            httpContext.Response.ContentType = "image/bmp";
+                            httpContext.Response.ContentLength64 = bmp.Length;
+                            httpContext.Response.OutputStream.Write(bmp, 0, bmp.Length);
+                        }
+                        httpContext.Response.Close();
+                    }
+                    else if (httpContext.Request.Url.AbsolutePath == "/logs")
+                    {
+                        byte[] body = Encoding.UTF8.GetBytes(Diag.Dump());
+                        httpContext.Response.ContentType = "text/plain; charset=utf-8";
+                        httpContext.Response.ContentLength64 = body.Length;
+                        httpContext.Response.OutputStream.Write(body, 0, body.Length);
+                        httpContext.Response.Close();
+                    }
+                    else
+                    {
+                        httpContext.Response.StatusCode = 400;
+                        httpContext.Response.Close();
+                    }
                 }
-                else
+                catch (ObjectDisposedException)
                 {
-                    httpContext.Response.StatusCode = 400;
-                    httpContext.Response.Close();
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Diag.Log("Control server request failed: " + ex.Message);
                 }
             }
         }
 
         private async Task HandleWebSocketAsync(System.Net.WebSockets.WebSocket webSocket)
         {
-            var buffer = new byte[1024 * 4];
-            var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-
-            while (result.MessageType != WebSocketMessageType.Close)
+            Diag.Log("Control WS: client connected");
+            try
             {
-                var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                await OnMessageAsync(webSocket, message);
-                result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-            }
+                var buffer = new byte[1024 * 4];
+                var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
 
-            await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
+                while (result.MessageType != WebSocketMessageType.Close)
+                {
+                    var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    Diag.Log("Control WS: received " + message);
+                    await OnMessageAsync(webSocket, message);
+                    result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                }
+
+                Diag.Log("Control WS: client closed");
+                await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Diag.Log("Control WS: handler failed: " + ex.GetType().Name + " " + ex.Message);
+            }
         }
 
         protected async Task OnMessageAsync(System.Net.WebSockets.WebSocket webSocket, string message)
         {
-            BasicEvent data = JsonConvert.DeserializeObject<BasicEvent>(message);
+            var fields = MiniJson.ParseObject(message);
+            Event eventType = MiniJson.ParseEvent(fields);
 
-            switch (data.Event)
+            switch (eventType)
             {
                 case Event.ScanSSDP:
                     {
                         var devices = await ScanSSDPAsync();
-                        string resultEvent = JsonConvert.SerializeObject(new SSDPScanResultEvent(devices));
+                        string resultEvent = MiniJson.SsdpScanResult(devices);
                         await SendAsync(webSocket, resultEvent);
                         break;
                     }
 
                 case Event.ReadConfig:
                     {
-                        ReadConfigEvent readConfigEvent = JsonConvert.DeserializeObject<ReadConfigEvent>(message);
+                        ReadConfigEvent readConfigEvent = new ReadConfigEvent { Event = Event.ReadConfig, key = MiniJson.Field(fields, "key") };
                         string result = await ReadConfigAsync(readConfigEvent);
                         await SendAsync(webSocket, result);
                         break;
@@ -86,7 +170,7 @@ namespace HyperTizen.WebSocket
 
                 case Event.SetConfig:
                     {
-                        SetConfigEvent setConfigEvent = JsonConvert.DeserializeObject<SetConfigEvent>(message);
+                        SetConfigEvent setConfigEvent = new SetConfigEvent { Event = Event.SetConfig, key = MiniJson.Field(fields, "key"), value = MiniJson.Field(fields, "value") };
                         SetConfiguration(setConfigEvent);
                         break;
                     }
@@ -114,14 +198,19 @@ namespace HyperTizen.WebSocket
         private async Task<string> ReadConfigAsync(ReadConfigEvent readConfigEvent)
         {
             string result;
-            if (!Preference.Contains(readConfigEvent.key))
+            string live = ReadLiveValue(readConfigEvent.key);
+            if (live != null)
             {
-                result = JsonConvert.SerializeObject(new ReadConfigResultEvent(true, readConfigEvent.key, "Key doesn't exist."));
+                result = MiniJson.ReadConfigResult(false, readConfigEvent.key, live);
+            }
+            else if (!Preference.Contains(readConfigEvent.key))
+            {
+                result = MiniJson.ReadConfigResult(true, readConfigEvent.key, "Key doesn't exist.");
             }
             else
             {
                 string value = Preference.Get<string>(readConfigEvent.key);
-                result = JsonConvert.SerializeObject(new ReadConfigResultEvent(false, readConfigEvent.key, value));
+                result = MiniJson.ReadConfigResult(false, readConfigEvent.key, value);
             }
             return result;
         }
@@ -132,10 +221,32 @@ namespace HyperTizen.WebSocket
             await webSocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
         }
 
+        // Runtime state that is not stored in Preference; null when the key is not a live one.
+        private static string ReadLiveValue(string key)
+        {
+            switch (key)
+            {
+                case "connected":
+                    return Networking.IsConnected ? "true" : "false";
+                case "capturing":
+                    return App.client != null && App.client.IsRunning ? "true" : "false";
+                case "logs":
+                    return Diag.Tail(25);
+                default:
+                    return null;
+            }
+        }
+
         void SetConfiguration(SetConfigEvent setConfigEvent)
         {
             switch (setConfigEvent.key)
             {
+                case "fbsServer":
+                    {
+                        Preference.Set(setConfigEvent.key, setConfigEvent.value);
+                        try { Networking.Disconnect(); } catch (Exception ex) { Diag.Log("fbsServer change: disconnect failed: " + ex.Message); }
+                        return;
+                    }
                 case "rpcServer":
                     {
                         App.Configuration.RPCServer = setConfigEvent.value;
@@ -164,10 +275,37 @@ namespace HyperTizen.WebSocket
 
     public static class WebSocketServer
     {
+        private static readonly string[] Prefixes =
+        {
+            "http://*:8086/",
+            "http://+:8086/",
+        };
+
+        // Keeps trying: the network stack may not be ready right after boot,
+        // and a prefix can be refused on some firmware versions.
         public static async Task StartServerAsync()
         {
-            var wsServer = new WSServer("http://+:8086/");
-            await wsServer.StartAsync();
+            while (true)
+            {
+                foreach (string prefix in Prefixes)
+                {
+                    WSServer server = null;
+                    try
+                    {
+                        server = new WSServer(prefix);
+                        server.Start();
+                        Diag.Log("Control server listening on " + prefix);
+                        await server.RunAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Diag.Log("Control server on " + prefix + " failed: " + ex.GetType().Name + " " + ex.Message);
+                        server?.Stop();
+                    }
+                }
+
+                await Task.Delay(5000);
+            }
         }
     }
 

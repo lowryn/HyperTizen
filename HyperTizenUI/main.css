@@ -1,62 +1,107 @@
 body {
-    background-color: #368bec;
-    font-family: Arial, sans-serif;
     margin: 0;
-    padding: 0;
+    background: #101418;
+    color: #e8ecf1;
+    font-family: Arial, Helvetica, sans-serif;
 }
 
 .content {
-    display: flex;
-    justify-content: center;
-    flex-direction: column;
-    align-items: center;
+    padding: 40px 80px;
 }
 
-h1, h2 {
-    color: #fff;
-    text-align: center;
-    font-size: 50px;
+h1 {
+    font-size: 52px;
+    margin: 0 0 24px 0;
 }
 
-a {
-    color: #fff;
-    text-decoration: none;
+.panel {
+    background: #1a2028;
+    border-radius: 12px;
+    padding: 16px 28px;
+    margin-bottom: 28px;
 }
 
-.ssdpItem {
-    width: 100%;
-    height: 30%;
-    background-color: #50505e;
-    border-radius: 20px;
+.row {
+    font-size: 30px;
+    padding: 8px 0;
 }
 
-.ssdpItem a {
+.label {
+    display: inline-block;
+    width: 240px;
+    color: #9aa7b5;
+}
+
+.value.ok {
+    color: #5ddc7a;
+}
+
+.value.bad {
+    color: #ff7a7a;
+}
+
+.actions,
+.addr {
+    margin-bottom: 24px;
+}
+
+.addr label {
     display: block;
-    height: 100%;
-    width: 100%;
-    padding: 1rem;
-    font-size: 50px;
+    font-size: 26px;
+    color: #9aa7b5;
+    margin-bottom: 10px;
 }
 
-.ssdpItem:focus {
-    transform: translateY(-3px) scale(1.02);
-    box-shadow: 0 4px 8px rgba(255, 6, 6, 0.644), 0 0 20px rgba(150, 150, 150, 0.2);
+button,
+input {
+    font-size: 30px;
+    padding: 14px 28px;
+    margin-right: 18px;
+    border: 3px solid transparent;
+    border-radius: 10px;
+    background: #2a3340;
+    color: #e8ecf1;
     outline: none;
 }
 
-#ssdpItems {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 40%;
-    height: 100%;
-    padding: 1rem;
-    gap: 1rem
+input {
+    width: 520px;
+    background: #ffffff;
+    color: #101418;
 }
 
-#status {
-    color: #fff;
-    font-size: 30px;
-    text-align: center;
+button:disabled {
+    opacity: 0.4;
+}
+
+button:focus,
+input:focus {
+    border-color: #4da3ff;
+    box-shadow: 0 0 0 4px rgba(77, 163, 255, 0.35);
+}
+
+.target {
+    font-size: 22px;
+    color: #9aa7b5;
+    margin-bottom: 8px;
+}
+
+.message {
+    font-size: 26px;
+    min-height: 34px;
+    color: #ffd166;
+    margin-bottom: 16px;
+}
+
+.logs {
+    font-size: 18px;
+    line-height: 1.35;
+    color: #9aa7b5;
+    background: #0b0e12;
+    border-radius: 10px;
+    padding: 14px 20px;
+    max-height: 340px;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-all;
 }

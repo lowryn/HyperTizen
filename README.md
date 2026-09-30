@@ -108,6 +108,27 @@ cd bin/Release/tizen90
 ~/tizen-studio/tools/ide/bin/tizen run -p io.gh.reisxd.HyperTizen -s <tv-ip>:26101
 ```
 
+## Tizen 6.0 (tested on a Samsung QE55Q80A)
+
+On a QE55Q80AATXXC (Tizen 6.0) the `libvideoenhance.so` pixel-sampling path cannot work: the library is a
+19 KB wrapper around `libave.so` and exports no `*rgb_measure*` functions. Tizen < 8 therefore uses the full-frame
+NV12 path through `secvideo_api_capture_screen` in `libsec-video-capture.so.0` (480x270), sent to HyperHDR over
+FlatBuffers/TCP (port 19400).
+
+Things that matter on this firmware:
+
+- The capture info struct is larger than the 36-byte `Info_t`; the code passes a zeroed 256-byte native buffer.
+  A 36-byte struct kills the process with no exception.
+- `Newtonsoft.Json` fails to load, so control messages use `MiniJson`.
+- `dlog` returns nothing. The service keeps its own log: `GET http://<tv-ip>:8086/logs` (includes the previous run),
+  `GET /frame.bmp` returns one capture, `GET /set?key=fbsServer&value=<pc-ip>:19400` sets the HyperHDR address and
+  `GET /set?key=enabled&value=true` starts capturing. These endpoints have no authentication.
+- The TizenBrew module script launches the service with `shell:0 debug <appid>` over the TV's own sdb
+  (`127.0.0.1:26101`, which needs Developer Mode's host IP to be `127.0.0.1`) and serves `http://<tv-ip>:8087/status`.
+- The service does not start by itself after a reboot or standby: open TizenBrew and launch the module each time.
+
+Tizen 7, 8 and 9 were not tested with these changes.
+
 ## Credits
 
 Original project by [reisxd](https://github.com/reisxd/HyperTizen).

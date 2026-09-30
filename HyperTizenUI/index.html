@@ -1,81 +1,41 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HyperTizen</title>
     <link rel="stylesheet" href="main.css">
-    <script src="js/wsClient.js"></script>
     <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
+    <script src="js/wsClient.js"></script>
 </head>
 
 <body>
     <div class="content">
         <h1>HyperTizen</h1>
-        <h3 id="status">Status</h3>
-        <a><input type="checkbox" id="enabled"> Enabled</a>
-        <h2 id="ssdpDeviceTitle">SSDP Devices</h2>
-        <div id="ssdpItems"></div>
+
+        <div class="panel">
+            <div class="row"><span class="label">Service</span><span id="svcState" class="value bad">Connexion...</span></div>
+            <div class="row"><span class="label">Capture</span><span id="capState" class="value">-</span></div>
+            <div class="row"><span class="label">Mode</span><span id="capMode" class="value">-</span></div>
+            <div class="row"><span class="label">HyperHDR</span><span id="hhState" class="value">-</span></div>
+        </div>
+
+        <div class="actions">
+            <button id="btnLaunch" tabindex="0">Demarrer le service</button>
+            <button id="btnToggle" tabindex="0">Activer la capture</button>
+        </div>
+
+        <div class="addr">
+            <label for="fbsInput">Adresse de HyperHDR (IP:port)</label>
+            <input type="text" id="fbsInput" tabindex="0" placeholder="192.168.1.38:19400">
+            <button id="btnSave" tabindex="0">Enregistrer</button>
+        </div>
+
+        <div id="target" class="target"></div>
+        <div id="message" class="message"></div>
+        <pre id="logs" class="logs"></pre>
     </div>
 </body>
-
-<script>
-    window.onload = function () {
-        let elements = document.querySelectorAll('button, input, [tabindex]');
-        let elementsArray = Array.prototype.slice.call(elements);
-        let focusedElement = document.activeElement;
-        let focusedIndex = elementsArray.indexOf(focusedElement);
-
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                if (focusedIndex < elementsArray.length - 1) {
-                    elementsArray[focusedIndex + 1].focus();
-                    focusedIndex++;
-                }
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                if (focusedIndex > 0) {
-                    elementsArray[focusedIndex - 1].focus();
-                    focusedIndex--;
-                }
-            } else if (e.key == 'Enter') {
-                e.preventDefault();
-                const element = elementsArray[focusedIndex];
-                element.click();
-                if (element.classList.contains('ssdpItem')) {
-                    const uri = element.getAttribute('data-uri');
-                    setRPC(uri);
-                }
-            }
-        });
-
-        const observer = new MutationObserver(function (mutations) {
-            mutations.forEach(function (mutation) {
-                if (mutation.addedNodes.length > 0) {
-                    elements = document.querySelectorAll('button, input, [tabindex]');
-                    elementsArray = Array.prototype.slice.call(elements);
-                    focusedIndex = elementsArray.indexOf(document.activeElement);
-                }
-            });
-        });
-
-        observer.observe(document.body, { childList: true, subtree: true });
-        fetch('http://127.0.0.1:8081').then(res => res.text()).then(ip => {
-            deviceIP = ip;
-
-            const testWS = new WebSocket(`ws://${ip}:8086`);
-
-            testWS.onopen = function () {
-                testWS.close();
-                open();
-            };
-            testWS.onerror = function () {
-                location.reload();
-            };
-        });
-    };
-</script>
 
 </html>

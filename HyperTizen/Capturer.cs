@@ -136,31 +136,31 @@ namespace HyperTizen
             try
             {
                 MeasureConditionPpi(out dummy);
-                Tizen.Log.Debug("HyperTizen", "API probe: ppi_ve_* found");
+                Diag.Log("API probe: ppi_ve_* found");
                 Preference.Set("api_probe", "ppi_ve");
                 return ApiVariant.PpiVe;
             }
-            catch { }
+            catch (Exception ex) { Diag.Log("API probe: ppi_ve_* unavailable: " + ex.GetType().Name + " " + ex.Message); }
 
             try
             {
                 MeasureCondition7(out dummy);
-                Tizen.Log.Debug("HyperTizen", "API probe: ve_* found");
+                Diag.Log("API probe: ve_* found");
                 Preference.Set("api_probe", "ve7");
                 return ApiVariant.Ve7;
             }
-            catch { }
+            catch (Exception ex) { Diag.Log("API probe: ve_* unavailable: " + ex.GetType().Name + " " + ex.Message); }
 
             try
             {
                 MeasureCondition(out dummy);
-                Tizen.Log.Debug("HyperTizen", "API probe: cs_ve_* found");
+                Diag.Log("API probe: cs_ve_* found");
                 Preference.Set("api_probe", "cs_ve");
                 return ApiVariant.CsVe;
             }
-            catch { }
+            catch (Exception ex) { Diag.Log("API probe: cs_ve_* unavailable: " + ex.GetType().Name + " " + ex.Message); }
 
-            Tizen.Log.Debug("HyperTizen", "API probe: no variant found");
+            Diag.Log("API probe: no variant found");
             Preference.Set("api_probe", "none");
             return ApiVariant.Unknown;
         }

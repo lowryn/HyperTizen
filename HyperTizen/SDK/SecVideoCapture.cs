@@ -8,6 +8,10 @@ namespace HyperTizen.SDK
     {
         [DllImport("/usr/lib/libsec-video-capture.so.0", CallingConvention = CallingConvention.Cdecl, EntryPoint = "secvideo_api_capture_screen")]
         public static extern int CaptureScreen(int w, int h, ref SecVideoCapture.Info_t pInfo);
+
+        // Same function with a caller-sized native buffer: the real struct may be larger than Info_t on some firmware.
+        [DllImport("/usr/lib/libsec-video-capture.so.0", CallingConvention = CallingConvention.Cdecl, EntryPoint = "secvideo_api_capture_screen")]
+        public static extern int CaptureScreenRaw(int w, int h, IntPtr pInfo);
     }
 
     // Tizen 8+: C++ object with vtable — Samsung changed the API
