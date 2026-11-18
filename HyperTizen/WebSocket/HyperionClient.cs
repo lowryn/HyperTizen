@@ -202,6 +202,11 @@ namespace HyperTizen.WebSocket
             }
         }
 
+        // Performance stats, logged every 5 s.
+        private int _statFrames, _statFails;
+        private long _statCapTicks, _statSendTicks;
+        private long _statStart = System.Diagnostics.Stopwatch.GetTimestamp();
+
         // SecVideoCapture path: SSDP → TCP FlatBuffers → NV12 frames
         private async Task StartSecVideo(CancellationToken ct)
         {
@@ -241,11 +246,32 @@ namespace HyperTizen.WebSocket
                     }
                 }
 
+                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
                 var frame = VideoCapture.CaptureFrame();
+                long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
                 if (frame.HasValue)
+                {
                     await Networking.SendFrameAsync(frame.Value.yData, frame.Value.uvData);
+                    _statFrames++;
+                    _statCapTicks += t1 - t0;
+                    _statSendTicks += System.Diagnostics.Stopwatch.GetTimestamp() - t1;
+                }
                 else
+                {
+                    _statFails++;
                     await Task.Delay(200, ct);
+                }
+
+                double el = (System.Diagnostics.Stopwatch.GetTimestamp() - _statStart) / (double)System.Diagnostics.Stopwatch.Frequency;
+                if (el >= 5)
+                {
+                    double msPerTick = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    int n = Math.Max(_statFrames, 1);
+                    Diag.Log($"STATS {el:F1}s: {_statFrames / el:F1} fps, capture {_statCapTicks * msPerTick / n:F1} ms/frame, send {_statSendTicks * msPerTick / n:F1} ms/frame, failed {_statFails}");
+                    _statFrames = _statFails = 0;
+                    _statCapTicks = _statSendTicks = 0;
+                    _statStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                }
             }
 
             Networking.Disconnect();

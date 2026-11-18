@@ -6,11 +6,28 @@ namespace HyperTizen
 {
     public static class VideoCapture
     {
-        public const int Width  = 480;  // 3840 / 8
-        public const int Height = 270;  // 2160 / 8
+        // Capture size, configurable via the "capSize" preference ("WIDTHxHEIGHT"), read once at startup.
+        // Default 480x270 (3840/8 x 2160/8). Change with /set?key=capSize&value=240x136, then restart the service.
+        public static readonly int Width, Height;
+        private static readonly int YSize, UVSize;
 
-        private static readonly int YSize  = Width * Height;
-        private static readonly int UVSize = (Width * Height) / 2;
+        static VideoCapture()
+        {
+            int w = 480, h = 270;
+            try
+            {
+                if (Preference.Contains("capSize"))
+                {
+                    var p = Preference.Get<string>("capSize").ToLowerInvariant().Split('x');
+                    int pw = int.Parse(p[0]), ph = int.Parse(p[1]);
+                    if (pw >= 16 && ph >= 16 && pw <= 1920 && ph <= 1080) { w = pw; h = ph; }
+                }
+            }
+            catch { }
+            Width = w; Height = h;
+            YSize = Width * Height;
+            UVSize = (Width * Height) / 2;
+        }
 
         private const int InfoBytes = 256;
         private static IntPtr _pInfo;
