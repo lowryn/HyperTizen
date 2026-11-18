@@ -21,7 +21,7 @@ namespace HyperTizen
             SendRegister();
             // Background task to drain HyperHDR's reply messages
             Task.Run(() => DrainRepliesAsync());
-            Tizen.Log.Debug("HyperTizen", $"Networking: connected to {ip}:{port} (FlatBuffers TCP)");
+            Diag.Log($"Networking: connected to {ip}:{port} (FlatBuffers TCP)");
         }
 
         public static void Disconnect()
@@ -42,7 +42,7 @@ namespace HyperTizen
             }
             catch (Exception ex)
             {
-                Tizen.Log.Debug("HyperTizen", "Networking.SendFrameAsync error: " + ex.Message);
+                Diag.Log("Networking.SendFrameAsync error: " + ex.Message);
                 Disconnect();
             }
         }
@@ -51,7 +51,7 @@ namespace HyperTizen
         {
             byte[] msg = BuildRegisterMessage();
             WriteMessage(msg);
-            Tizen.Log.Debug("HyperTizen", "Networking: register sent");
+            Diag.Log("Networking: register sent");
         }
 
         private static async Task DrainRepliesAsync()
