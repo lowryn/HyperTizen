@@ -7,6 +7,19 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!--
+    Opt-in build for Tizen 5.5 TVs (2020 models, e.g. Q80T): dotnet build -c Release -p:Tizen55=true
+    - tizen60: the TV ships .NET Core 3.0. A tizen90 build references System.Runtime 4.2.2 (Core 3.1)
+      and the service dies at start without writing a log.
+    - tizen-manifest.tizen55.xml: api-version 5.5. With 6.5/9, vd_appinstall fails with
+      "install failed[118, -4] Operation not allowed".
+    The default build (tizen90, tizen-manifest.xml) is unchanged.
+  -->
+  <PropertyGroup Condition=" '$(Tizen55)' == 'true' ">
+    <TargetFramework>tizen60</TargetFramework>
+    <TizenManifestFile>tizen-manifest.tizen55.xml</TizenManifestFile>
+  </PropertyGroup>
+
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugType>portable</DebugType>
   </PropertyGroup>
@@ -21,7 +34,6 @@
 
   <ItemGroup>
     <PackageReference Include="Google.FlatBuffers" Version="25.2.10" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Rssdp" Version="4.0.4" />
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
   </ItemGroup>
