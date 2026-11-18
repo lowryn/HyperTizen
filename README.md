@@ -108,6 +108,27 @@ cd bin/Release/tizen90
 ~/tizen-studio/tools/ide/bin/tizen run -p io.gh.reisxd.HyperTizen -s <tv-ip>:26101
 ```
 
+## Tizen 6.0 (tested on a Samsung QE55Q80A)
+
+On a QE55Q80AATXXC (Tizen 6.0) the `libvideoenhance.so` pixel-sampling path cannot work: the library is a
+19 KB wrapper around `libave.so` and exports no `*rgb_measure*` functions. Tizen < 8 therefore uses the full-frame
+NV12 path through `secvideo_api_capture_screen` in `libsec-video-capture.so.0` (480x270), sent to HyperHDR over
+FlatBuffers/TCP (port 19400).
+
+Things that matter on this firmware:
+
+- The capture info struct is larger than the 36-byte `Info_t`; the code passes a zeroed 256-byte native buffer.
+  A 36-byte struct kills the process with no exception.
+- `Newtonsoft.Json` fails to load, so control messages use `MiniJson`.
+- `dlog` returns nothing. The service keeps its own log (capped at ~256 KB). `GET http://<tv-ip>:8086/logs` (includes the
+  previous run) and `GET /frame.bmp` (one capture) are **off by default** because they expose TV data to the LAN. Enable them with
+  `GET /set?key=diag_http&value=true` (disable with `value=false`). `GET /set?key=fbsServer&value=<pc-ip>:19400` sets the
+  HyperHDR address and `GET /set?key=enabled&value=true` starts capturing; `/set` is always on, like the control WebSocket.
+  None of these endpoints have authentication.
+- The service does not start by itself after a reboot or standby: launch it again each time (for example from TizenBrew).
+
+Tizen 7, 8 and 9 were not tested with these changes.
+
 ## Credits
 
 Original project by [reisxd](https://github.com/reisxd/HyperTizen).
