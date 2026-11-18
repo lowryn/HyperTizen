@@ -105,3 +105,18 @@ input:focus {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+.ssdpItem {
+    font-size: 28px;
+    padding: 12px 20px;
+    margin: 0 0 10px 0;
+    border: 3px solid transparent;
+    border-radius: 10px;
+    background: #2a3340;
+    outline: none;
+}
+
+.ssdpItem:focus {
+    border-color: #4da3ff;
+    box-shadow: 0 0 0 4px rgba(77, 163, 255, 0.35);
+}

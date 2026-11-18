@@ -10,6 +10,7 @@ namespace HyperTizen
     public static class Diag
     {
         private const int MaxLines = 400;
+        private const long MaxFileBytes = 256 * 1024;
         private static readonly ConcurrentQueue<string> _lines = new ConcurrentQueue<string>();
         private static string _previous = "";
         private static string _path;
@@ -43,7 +44,15 @@ namespace HyperTizen
             while (_lines.Count > MaxLines && _lines.TryDequeue(out _)) { }
 
             if (_path == null) return;
-            try { File.AppendAllText(_path, line + "\n"); } catch { }
+            try
+            {
+                // Keep the file bounded: when it passes the cap, restart it from the recent in-memory lines.
+                if (new FileInfo(_path).Exists && new FileInfo(_path).Length > MaxFileBytes)
+                    File.WriteAllText(_path, string.Join("\n", _lines.ToArray()) + "\n");
+                else
+                    File.AppendAllText(_path, line + "\n");
+            }
+            catch { }
         }
 
         public static string Tail(int count)

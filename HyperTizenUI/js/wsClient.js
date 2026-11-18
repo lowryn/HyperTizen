@@ -12,7 +12,10 @@ var events = {
     SSDPScanResult: 4
 };
 
-var POLL_KEYS = ['enabled', 'capturing', 'cap_mode', 'connected', 'fbsServer', 'logs'];
+var POLL_KEYS = ['enabled', 'capturing', 'cap_mode', 'connected', 'fbsServer', 'rpcServer', 'logs'];
+var SSDP_SCAN_MS = 10000;
+var ssdpTimer = null;
+var ssdpDevices = [];
 
 var client = null;
 var deviceIP = null;
@@ -33,6 +36,7 @@ var state = {
     capMode: '-',
     connected: false,
     fbsServer: '',
+    rpcServer: '',
     logs: ''
 };
 
@@ -43,9 +47,9 @@ function byId(id) {
 function showTarget() {
     var el = byId('target');
     if (!el) return;
-    var api = (typeof tizen !== 'undefined' && tizen.application) ? 'oui' : 'non';
-    el.textContent = 'Cible : ws://' + deviceIP + ':' + SERVICE_PORT + ' | tentative ' + connectAttempts +
-        ' | dernier code ' + lastCloseCode + ' | API Tizen : ' + api;
+    var api = (typeof tizen !== 'undefined' && tizen.application) ? 'yes' : 'no';
+    el.textContent = 'Target: ws://' + deviceIP + ':' + SERVICE_PORT + ' | attempt ' + connectAttempts +
+        ' | last code ' + lastCloseCode + ' | Tizen API: ' + api;
 }
 
 function showMessage(text) {
@@ -55,25 +59,38 @@ function showMessage(text) {
 
 function render() {
     var svc = byId('svcState');
-    svc.textContent = state.service ? 'Connecte' : 'Injoignable';
+    svc.textContent = state.service ? 'Connected' : 'Unreachable';
     svc.className = 'value ' + (state.service ? 'ok' : 'bad');
 
-    byId('capState').textContent = state.service ? (state.enabled ? 'Activee' : 'Desactivee') : '-';
+    byId('capState').textContent = state.service ? (state.enabled ? 'Enabled' : 'Disabled') : '-';
     byId('capMode').textContent = state.service ? state.capMode : '-';
 
+    // Two capture paths: "secvideo" sends NV12 frames to HyperHDR over TCP (fbsServer), "libve" uses the
+    // libvideoenhance + WebSocket path (rpcServer, picked from the SSDP list). The "connected" flag only
+    // tracks the TCP path, so for libve the status follows the capture state instead.
+    var libve = state.capMode === 'libve';
     var hh = byId('hhState');
     if (!state.service) {
         hh.textContent = '-';
         hh.className = 'value';
+    } else if (libve) {
+        hh.textContent = state.rpcServer ? (state.enabled ? 'Capturing to ' : 'Selected: ') + state.rpcServer : 'No device selected';
+        hh.className = 'value ' + (state.rpcServer && state.enabled ? 'ok' : '');
     } else if (state.connected) {
-        hh.textContent = 'Connecte (' + state.fbsServer + ')';
+        hh.textContent = 'Connected (' + state.fbsServer + ')';
         hh.className = 'value ok';
     } else {
-        hh.textContent = state.enabled ? 'Non connecte' : 'En attente';
+        hh.textContent = state.enabled ? 'Not connected' : 'Waiting';
         hh.className = 'value ' + (state.enabled ? 'bad' : '');
     }
 
-    byId('btnToggle').textContent = state.enabled ? 'Desactiver la capture' : 'Activer la capture';
+    var showFbs = state.capMode !== 'libve';
+    var showRpc = state.capMode !== 'secvideo';
+    byId('fbsSection').style.display = showFbs ? '' : 'none';
+    byId('rpcSection').style.display = showRpc ? '' : 'none';
+    byId('rpcTitle').textContent = 'HyperHDR devices (SSDP)' + (state.rpcServer ? ' - current: ' + state.rpcServer : '');
+
+    byId('btnToggle').textContent = state.enabled ? 'Disable capture' : 'Enable capture';
     byId('btnToggle').disabled = !state.service;
     byId('btnSave').disabled = !state.service;
 
@@ -110,6 +127,9 @@ function onOpen() {
     poll();
     clearInterval(pollTimer);
     pollTimer = setInterval(poll, POLL_MS);
+    send({ event: events.ScanSSDP });
+    clearInterval(ssdpTimer);
+    ssdpTimer = setInterval(function () { send({ event: events.ScanSSDP }); }, SSDP_SCAN_MS);
     render();
 }
 
@@ -120,6 +140,7 @@ function onMessage(ev) {
     } catch (e) {
         return;
     }
+    if (msg.Event === events.SSDPScanResult) { applySsdp(msg); return; }
     if (msg.Event !== events.ReadConfigResult) return;
     applyResult(msg);
 }
@@ -127,6 +148,7 @@ function onMessage(ev) {
 function applyResult(msg) {
     if (msg.error) {
         if (msg.key === 'fbsServer') state.fbsServer = '';
+        if (msg.key === 'rpcServer') state.rpcServer = '';
         if (msg.key === 'cap_mode') state.capMode = '-';
         render();
         return;
@@ -135,11 +157,41 @@ function applyResult(msg) {
         case 'enabled': state.enabled = msg.value === 'true'; break;
         case 'capturing': state.capturing = msg.value === 'true'; break;
         case 'connected': state.connected = msg.value === 'true'; break;
-        case 'cap_mode': state.capMode = msg.value === 'secvideo' ? 'Video complete (NV12)' : msg.value; break;
+        case 'cap_mode': state.capMode = msg.value === 'secvideo' ? 'Full frame (NV12)' : msg.value; break;
         case 'fbsServer': state.fbsServer = msg.value; break;
+        case 'rpcServer': state.rpcServer = msg.value; break;
         case 'logs': state.logs = msg.value; break;
     }
     render();
+}
+
+function applySsdp(msg) {
+    var list = msg.devices || [];
+    for (var i = 0; i < list.length; i++) {
+        var base = list[i].UrlBase || '';
+        var url = base.indexOf('https') === 0 ? base.replace('https', 'wss') : base.replace('http', 'ws');
+        var known = false;
+        for (var j = 0; j < ssdpDevices.length; j++) if (ssdpDevices[j].url === url) known = true;
+        if (known) continue;
+        ssdpDevices.push({ url: url, name: list[i].FriendlyName || url });
+
+        var item = document.createElement('div');
+        item.className = 'ssdpItem';
+        item.tabIndex = 0;
+        item.textContent = list[i].FriendlyName || url;
+        item.setAttribute('data-uri', url);
+        item.onclick = (function (u) { return function () { setRPC(u); }; })(url);
+        byId('ssdpItems').appendChild(item);
+    }
+}
+
+function setRPC(url) {
+    if (!state.service) return;
+    setKey('rpcServer', url);
+    state.rpcServer = url;
+    showMessage('HyperHDR device selected: ' + url);
+    render();
+    setTimeout(poll, 1000);
 }
 
 function onClose(ev) {
@@ -148,16 +200,17 @@ function onClose(ev) {
     var wasUp = state.service;
     state.service = false;
     clearInterval(pollTimer);
+    clearInterval(ssdpTimer);
     render();
     failedAttempts++;
 
     if (wasUp) {
-        showMessage('Connexion au service perdue. Nouvelle tentative...');
+        showMessage('Lost connection to the service. Retrying...');
     } else if (failedAttempts >= 2 && !launchTried) {
         launchTried = true;
         launchService(true);
     } else if (failedAttempts >= 2 && new Date().getTime() - launchedAt > LAUNCH_GRACE_MS) {
-        showMessage('Service injoignable. Appuyez sur "Demarrer le service" pour relancer.');
+        showMessage('Service unreachable. Press "Start service" to try again.');
     }
     scheduleReconnect();
 }
@@ -190,16 +243,16 @@ var HELPER_PORT = 8087;
 
 // Asks the module's Node service (js/service.js, port 8087) to launch the native service.
 function launchViaHelper(automatic) {
-    showMessage(automatic ? 'Service injoignable : demande de lancement a TizenBrew...' : 'Demande de lancement a TizenBrew...');
+    showMessage(automatic ? 'Service unreachable: asking TizenBrew to launch it...' : 'Asking TizenBrew to launch the service...');
     launchedAt = new Date().getTime();
     fetch('http://' + deviceIP + ':' + HELPER_PORT + '/launch')
         .then(function (res) { return res.json(); })
         .then(function (info) {
             var last = info.log && info.log.length ? info.log[info.log.length - 1] : '';
-            showMessage((info.serviceUp ? 'Service actif. ' : 'Lancement demande. ') + 'API Tizen cote TizenBrew : ' + info.tizenApi + '. ' + last);
+            showMessage((info.serviceUp ? 'Service running. ' : 'Launch requested. ') + 'TizenBrew-side Tizen API: ' + info.tizenApi + '. ' + last);
         })
         .catch(function () {
-            showMessage('Script de service TizenBrew injoignable (port ' + HELPER_PORT + '). Autorisez-le dans TizenBrew (Autolaunch service) ou lancez le service depuis le PC.');
+            showMessage('TizenBrew service script unreachable (port ' + HELPER_PORT + '). Allow it in TizenBrew (Autolaunch service) or start the service from a PC.');
         });
 }
 
@@ -208,16 +261,16 @@ function launchService(automatic) {
         launchViaHelper(automatic);
         return;
     }
-    showMessage(automatic ? 'Service injoignable : tentative de lancement...' : 'Lancement du service...');
+    showMessage(automatic ? 'Service unreachable: trying to launch it...' : 'Launching service...');
     launchedAt = new Date().getTime();
     try {
         tizen.application.launch(
             SERVICE_APP_ID,
-            function () { showMessage('Lancement demande. Attente du service...'); },
-            function (e) { showMessage('Lancement refuse : ' + (e && e.message ? e.message : e)); }
+            function () { showMessage('Launch requested. Attente du service...'); },
+            function (e) { showMessage('Launch refused: ' + (e && e.message ? e.message : e)); }
         );
     } catch (e) {
-        showMessage('Lancement impossible : ' + e.message);
+        showMessage('Cannot launch: ' + e.message);
     }
 }
 
@@ -226,7 +279,7 @@ function toggleCapture() {
     var next = !state.enabled;
     setKey('enabled', next ? 'true' : 'false');
     state.enabled = next;
-    showMessage(next ? 'Capture activee.' : 'Capture desactivee.');
+    showMessage(next ? 'Capture enabled.' : 'Capture disabled.');
     render();
     setTimeout(poll, 800);
 }
@@ -243,14 +296,14 @@ function saveAddress() {
     if (!state.service) return;
     var address = normalizeAddress(byId('fbsInput').value);
     if (!address) {
-        showMessage('Adresse invalide. Exemple : 192.168.1.38:19400');
+        showMessage('Invalid address. Example: 192.168.1.38:19400');
         return;
     }
     setKey('fbsServer', address);
     state.fbsServer = address;
     fbsInputTouched = false;
     byId('fbsInput').value = address;
-    showMessage('Adresse enregistree : ' + address);
+    showMessage('Address saved: ' + address);
     render();
     setTimeout(poll, 1500);
 }
@@ -283,8 +336,10 @@ function setupNavigation() {
         var list = [];
         for (var i = 0; i < ids.length; i++) {
             var el = byId(ids[i]);
-            if (el && !el.disabled) list.push(el);
+            if (el && !el.disabled && el.offsetParent !== null) list.push(el);
         }
+        var items = document.querySelectorAll('.ssdpItem');
+        for (var k = 0; k < items.length; k++) if (items[k].offsetParent !== null) list.push(items[k]);
         return list;
     }
 

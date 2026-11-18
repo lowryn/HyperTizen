@@ -120,9 +120,11 @@ Things that matter on this firmware:
 - The capture info struct is larger than the 36-byte `Info_t`; the code passes a zeroed 256-byte native buffer.
   A 36-byte struct kills the process with no exception.
 - `Newtonsoft.Json` fails to load, so control messages use `MiniJson`.
-- `dlog` returns nothing. The service keeps its own log: `GET http://<tv-ip>:8086/logs` (includes the previous run),
-  `GET /frame.bmp` returns one capture, `GET /set?key=fbsServer&value=<pc-ip>:19400` sets the HyperHDR address and
-  `GET /set?key=enabled&value=true` starts capturing. These endpoints have no authentication.
+- `dlog` returns nothing. The service keeps its own log (capped at ~256 KB). `GET http://<tv-ip>:8086/logs` (includes the
+  previous run) and `GET /frame.bmp` (one capture) are **off by default** because they expose TV data to the LAN. Enable them with
+  `GET /set?key=diag_http&value=true` (disable with `value=false`). `GET /set?key=fbsServer&value=<pc-ip>:19400` sets the
+  HyperHDR address and `GET /set?key=enabled&value=true` starts capturing; `/set` is always on, like the control WebSocket.
+  None of these endpoints have authentication.
 - The TizenBrew module script launches the service with `shell:0 debug <appid>` over the TV's own sdb
   (`127.0.0.1:26101`, which needs Developer Mode's host IP to be `127.0.0.1`) and serves `http://<tv-ip>:8087/status`.
 - The service does not start by itself after a reboot or standby: open TizenBrew and launch the module each time.

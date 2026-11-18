@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
@@ -15,21 +15,26 @@
         <h1>HyperTizen</h1>
 
         <div class="panel">
-            <div class="row"><span class="label">Service</span><span id="svcState" class="value bad">Connexion...</span></div>
+            <div class="row"><span class="label">Service</span><span id="svcState" class="value bad">Connecting...</span></div>
             <div class="row"><span class="label">Capture</span><span id="capState" class="value">-</span></div>
             <div class="row"><span class="label">Mode</span><span id="capMode" class="value">-</span></div>
             <div class="row"><span class="label">HyperHDR</span><span id="hhState" class="value">-</span></div>
         </div>
 
         <div class="actions">
-            <button id="btnLaunch" tabindex="0">Demarrer le service</button>
-            <button id="btnToggle" tabindex="0">Activer la capture</button>
+            <button id="btnLaunch" tabindex="0">Start service</button>
+            <button id="btnToggle" tabindex="0">Enable capture</button>
         </div>
 
-        <div class="addr">
-            <label for="fbsInput">Adresse de HyperHDR (IP:port)</label>
+        <div id="fbsSection" class="addr">
+            <label for="fbsInput">HyperHDR address (IP:port)</label>
             <input type="text" id="fbsInput" tabindex="0" placeholder="192.168.1.38:19400">
-            <button id="btnSave" tabindex="0">Enregistrer</button>
+            <button id="btnSave" tabindex="0">Save</button>
+        </div>
+
+        <div id="rpcSection" class="addr">
+            <label id="rpcTitle">HyperHDR devices (SSDP)</label>
+            <div id="ssdpItems"></div>
         </div>
 
         <div id="target" class="target"></div>

@@ -37,7 +37,7 @@ namespace HyperTizen
             Marshal.WriteInt32(_pInfo, 0, YSize);
             Marshal.WriteInt32(_pInfo, 4, UVSize);
             Marshal.WriteIntPtr(_pInfo, 16, _pImageY);
-            Marshal.WriteIntPtr(_pInfo, 20, _pImageUV);
+            Marshal.WriteIntPtr(_pInfo, 16 + IntPtr.Size, _pImageUV);
             return SDK.SecVideoCaptureT7.CaptureScreenRaw(Width, Height, _pInfo);
         }
 
@@ -152,7 +152,7 @@ namespace HyperTizen
             }
 
             IntPtr pY  = legacyApi ? Marshal.ReadIntPtr(_pInfo, 16) : info.pImageY;
-            IntPtr pUV = legacyApi ? Marshal.ReadIntPtr(_pInfo, 20) : info.pImageUV;
+            IntPtr pUV = legacyApi ? Marshal.ReadIntPtr(_pInfo, 16 + IntPtr.Size) : info.pImageUV;
             Marshal.Copy(pY,  _yData,  0, YSize);
             Marshal.Copy(pUV, _uvData, 0, UVSize);
 

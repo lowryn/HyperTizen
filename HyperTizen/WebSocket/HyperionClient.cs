@@ -92,9 +92,11 @@ namespace HyperTizen.WebSocket
                 Preference.Set("t7_probe", "running");
                 Diag.Log("T7 capture probe: calling secvideo_api_capture_screen...");
                 int result = VideoCapture.ProbeCapture();
-                Preference.Set("t7_probe", "ok");
-                Diag.Log("T7 capture probe: secvideo_api_capture_screen returned " + result);
-                return true;
+                // -4 = DRM content: the API itself works. Any other negative value means capture is unusable.
+                bool usable = result >= 0 || result == -4;
+                Preference.Set("t7_probe", usable ? "ok" : "failed");
+                Diag.Log("T7 capture probe: secvideo_api_capture_screen returned " + result + (usable ? " (usable)" : " (unusable, keeping libve path)"));
+                return usable;
             }
             catch (Exception ex)
             {

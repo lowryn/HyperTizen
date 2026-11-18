@@ -37,6 +37,13 @@ namespace HyperTizen.WebSocket
             try { _httpListener.Close(); } catch { }
         }
 
+        // Off unless the "diag_http" preference is "true" (set it via the control WebSocket or /set).
+        private static bool DiagHttpEnabled()
+        {
+            try { return Preference.Contains("diag_http") && Preference.Get<string>("diag_http") == "true"; }
+            catch { return false; }
+        }
+
         public async Task RunAsync()
         {
             while (true)
@@ -69,6 +76,12 @@ namespace HyperTizen.WebSocket
                         httpContext.Response.ContentType = "text/plain; charset=utf-8";
                         httpContext.Response.ContentLength64 = okBody.Length;
                         httpContext.Response.OutputStream.Write(okBody, 0, okBody.Length);
+                        httpContext.Response.Close();
+                    }
+                    else if ((httpContext.Request.Url.AbsolutePath == "/frame.bmp" || httpContext.Request.Url.AbsolutePath == "/logs") && !DiagHttpEnabled())
+                    {
+                        // Opt-in: /frame.bmp exposes the TV picture to the LAN, /logs may leak network details.
+                        httpContext.Response.StatusCode = 403;
                         httpContext.Response.Close();
                     }
                     else if (httpContext.Request.Url.AbsolutePath == "/frame.bmp")

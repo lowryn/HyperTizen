@@ -4,18 +4,19 @@ var net = require('net');
 
 var SERVICE_APP_ID = 'io.gh.reisxd.HyperTizen';
 var STATUS_PORT = 8087;
-var SERVICE_CHECK_URL = { host: '127.0.0.1', port: 8086, path: '/logs', timeout: 1500 };
+var SERVICE_CHECK_URL = { host: '127.0.0.1', port: 8086, path: '/', timeout: 1500 };
 var SDB_HOST = '127.0.0.1';
 var SDB_PORT = 26101;
 var SDB_TIMEOUT_MS = 8000;
 var SDB_LOCAL_ID = 12345;
 var CMD = { CNXN: 0x4e584e43, OPEN: 0x4e45504f, OKAY: 0x59414b4f, WRTE: 0x45545257, CLSE: 0x45534c43, AUTH: 0x48545541 };
 var RETRY_MS = 5000;
-var MAX_ATTEMPTS = 24;
+var FAST_ATTEMPTS = 24;       // after this many tries, keep going but back off
+var SLOW_RETRY_MS = 30000;
 
 var status = {
-    node: typeof process !== 'undefined' ? process.version : 'inconnu',
-    tizenApi: typeof tizen !== 'undefined' && tizen && tizen.application ? 'oui' : 'non',
+    node: typeof process !== 'undefined' ? process.version : 'unknown',
+    tizenApi: typeof tizen !== 'undefined' && tizen && tizen.application ? 'yes' : 'no',
     serviceUp: false,
     attempts: 0,
     launching: false,
@@ -38,7 +39,7 @@ function checkServiceUp(callback) {
     try {
         var req = http.get(SERVICE_CHECK_URL, function (res) {
             res.resume();
-            done(res.statusCode === 200);
+            done(true); // any HTTP answer (even 400) means the control server is listening
         });
         req.on('error', function () { done(false); });
         req.setTimeout(SERVICE_CHECK_URL.timeout, function () {
@@ -82,20 +83,20 @@ function launchViaSdb(done) {
         finished = true;
         try { socket.destroy(); } catch (e) { }
         var ok = /launched|success/i.test(output);
-        note('sdb: ' + why + (output ? ' | sortie: ' + output.replace(/\s+/g, ' ').trim() : '') + ' | ' + (ok ? 'lancement OK' : 'pas de confirmation'));
+        note('sdb: ' + why + (output ? ' | output: ' + output.replace(/\s+/g, ' ').trim() : '') + ' | ' + (ok ? 'launch OK' : 'no confirmation'));
         done(ok);
     }
 
     try {
         socket = net.connect(SDB_PORT, SDB_HOST);
     } catch (e) {
-        note('sdb: connexion impossible: ' + e.message);
+        note('sdb: cannot connect: ' + e.message);
         done(false);
         return;
     }
-    socket.setTimeout(SDB_TIMEOUT_MS, function () { finish('delai depasse'); });
-    socket.on('error', function (e) { finish('erreur: ' + e.message); });
-    socket.on('close', function () { finish('connexion fermee'); });
+    socket.setTimeout(SDB_TIMEOUT_MS, function () { finish('timeout'); });
+    socket.on('error', function (e) { finish('error: ' + e.message); });
+    socket.on('close', function () { finish('connection closed'); });
     socket.on('connect', function () { socket.write(sdbPacket(CMD.CNXN, 0x01000000, 4096, 'host::')); });
     socket.on('data', function (chunk) {
         pending = Buffer.concat([pending, chunk]);
@@ -108,16 +109,16 @@ function launchViaSdb(done) {
             pending = pending.slice(24 + length);
 
             if (command === CMD.CNXN) {
-                note('sdb: connecte a ' + data.toString().replace(/\0/g, ''));
+                note('sdb: connected to ' + data.toString().replace(/\0/g, ''));
                 socket.write(sdbPacket(CMD.OPEN, SDB_LOCAL_ID, 0, 'shell:0 debug ' + SERVICE_APP_ID));
             } else if (command === CMD.AUTH) {
-                finish('authentification demandee par la TV');
+                finish('TV asked for authentication');
                 return;
             } else if (command === CMD.WRTE) {
                 output += data.toString();
                 socket.write(sdbPacket(CMD.OKAY, SDB_LOCAL_ID, arg0));
             } else if (command === CMD.CLSE) {
-                finish('commande terminee');
+                finish('command finished');
                 return;
             }
         }
@@ -129,9 +130,9 @@ function launchViaAppControl(onFailure) {
         tizen.application.launchAppControl(
             new tizen.ApplicationControl('http://tizen.org/appcontrol/operation/service'),
             SERVICE_APP_ID,
-            function () { note('launchAppControl(service) accepte'); },
+            function () { note('launchAppControl(service) accepted'); },
             function (e) {
-                note('launchAppControl(service) refuse: ' + (e && e.message ? e.message : e));
+                note('launchAppControl(service) refused: ' + (e && e.message ? e.message : e));
                 onFailure();
             }
         );
@@ -145,8 +146,8 @@ function launchViaLaunch() {
     try {
         tizen.application.launch(
             SERVICE_APP_ID,
-            function () { note('launch() accepte'); },
-            function (e) { note('launch() refuse: ' + (e && e.message ? e.message : e)); }
+            function () { note('launch() accepted'); },
+            function (e) { note('launch() refused: ' + (e && e.message ? e.message : e)); }
         );
     } catch (e) {
         note('launch() exception: ' + e.message);
@@ -159,19 +160,19 @@ function tryLaunch(reason) {
     checkServiceUp(function (up) {
         status.serviceUp = up;
         if (up) {
-            note('service deja actif (' + reason + ')');
+            note('service already running (' + reason + ')');
             status.launching = false;
             return;
         }
         status.attempts++;
-        note('lancement du service (' + reason + ', essai ' + status.attempts + ')');
+        note('launching service (' + reason + ', attempt ' + status.attempts + ')');
         launchViaSdb(function (ok) {
             if (ok) {
                 status.launching = false;
                 return;
             }
             if (typeof tizen === 'undefined' || !tizen || !tizen.application) {
-                note('tizen.application indisponible dans ce bac a sable');
+                note('tizen.application unavailable in this sandbox');
                 status.launching = false;
                 return;
             }
@@ -192,27 +193,29 @@ function send(res, code, body) {
 try {
     var server = http.createServer(function (req, res) {
         if (req.url === '/launch') {
-            tryLaunch('demande manuelle');
+            tryLaunch('manual request');
             setTimeout(function () { send(res, 200, status); }, 2500);
         } else {
             send(res, 200, status);
         }
     });
-    server.on('error', function (e) { note('serveur etat indisponible: ' + e.message); });
-    server.listen(STATUS_PORT, function () { note('etat sur le port ' + STATUS_PORT + ' (/status, /launch)'); });
+    server.on('error', function (e) { note('status server unavailable: ' + e.message); });
+    server.listen(STATUS_PORT, function () { note('status on port ' + STATUS_PORT + ' (/status, /launch)'); });
 } catch (e) {
-    note('serveur etat impossible: ' + e.message);
+    note('status server failed: ' + e.message);
 }
 
-note('demarrage: node ' + status.node + ', tizen.application ' + status.tizenApi);
-tryLaunch('demarrage');
+note('startup: node ' + status.node + ', tizen.application ' + status.tizenApi);
+tryLaunch('startup');
 
+// Keep retrying for as long as the module runs: a TV that is slow after boot (or wakes from
+// standby later) must still get the service started. Fast at first, then every SLOW_RETRY_MS.
 var retries = 0;
-var retryTimer = setInterval(function () {
-    retries++;
-    if (status.serviceUp || retries >= MAX_ATTEMPTS) {
-        clearInterval(retryTimer);
-        return;
-    }
-    tryLaunch('nouvel essai');
-}, RETRY_MS);
+function scheduleRetry() {
+    setTimeout(function () {
+        retries++;
+        tryLaunch('retry'); // no-op if the service already answers
+        scheduleRetry();
+    }, retries >= FAST_ATTEMPTS ? SLOW_RETRY_MS : RETRY_MS);
+}
+scheduleRetry();
